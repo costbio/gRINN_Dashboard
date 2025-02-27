@@ -1,4 +1,20 @@
-from dash import Dash, dcc, html, Input, Output, callback
+from dash import Dash, dcc, html, Input, Output, callback, dash_table
+import pandas as pd
+import plotly.express as px
+
+total_df = pd.read_csv("/mnt/d/experiments/hla_b39/2022_10_14_bioe_leviathan_backup/T1DM_B39_traj_analysis/gmx_traj_data/B3801_1/grinn_output/energies_intEnTotal.csv")
+
+# "Unnamed: 0" sütununu 'Residue' olarak adlandıralım
+total_df = total_df.rename(columns={'Unnamed: 0': 'Pair'})
+
+pair_df = pd.DataFrame(total_df['Pair'])
+
+# Verileri uzun formata (melt) dönüştürelim
+total_long = total_df.melt(id_vars=['Pair'], var_name='Frame', value_name='Energy')
+
+total_long_2plot = total_long.query('Pair == "345-298"')
+
+fig_total = px.line(total_long_2plot, x='Frame', y='Energy', title="Total Interaction Energy Time Series")
 
 # Starting the Dash app.
 app = Dash()
@@ -24,11 +40,8 @@ app.layout = html.Div([
 
 ])
 
-# Sayfa arası geçiş için callback fonksiyonu
-@app.callback(
-    Output("tabs-content", "children"),
-    Input("tabs", "value")
-)
+@callback(Output('tabs-content', 'children'),
+              Input('tabs', 'value'))
 def render_tab_content(tab):
     if tab == "tab-1":
         return html.Div([
@@ -43,8 +56,19 @@ def render_tab_content(tab):
         ])
     elif tab == "tab-2":
         return html.Div([
-            html.H3("Pairwise Energies Tables")
-        ])
+                    
+        html.Div([
+            html.H2("Table"),
+            dash_table.DataTable(pair_df.to_dict('records'), id="pair_table")
+        ], style={'padding': 10, 'flex': 1}),
+
+        html.Div([
+            html.H3("Pairwise Energies Tables"),
+            dcc.Graph(id="pair_energy_graph",figure=fig_total)
+        ], style={'padding': 10, 'flex': 1})], style={'display': 'flex', 'flexDirection': 'row'}
+
+        )
+
     elif tab == "tab-3":
         return html.Div([
             html.H3("Interactions Energy Matrix Tables")
@@ -62,15 +86,22 @@ def render_tab_content(tab):
             html.H3("Network Analysis Tables")
         ])
 
-# Veri yükleme callback fonksiyonu
+# Sayfa arası geçiş için callback fonksiyonu
 @app.callback(
-    Output('output-data-upload', 'children'),
-    Input('upload-data', 'filename')
+    Output(component_id="pair_energy_graph", component_property="figure"),
+    Input(component_id="pair_table", component_property="active_cell")
 )
-def update_output(uploaded_file):
-    if uploaded_file:
-        return html.Div(f'Uploaded: {uploaded_file}')
-    return 'No file uploaded yet.'
+def update_pair_energy_graph(active_cell):
+    print(active_cell)
+    if active_cell:
+        pair = pair_df.loc[active_cell['row'],'Pair']
+    else:
+        pair = pair_df.loc[0,'Pair']
+
+        total_long_2plot = total_long.query(f'Pair == {pair}')
+
+        fig_total = px.line(total_long_2plot, x='Frame', y='Energy', title="Total Interaction Energy Time Series")
+        return fig_total
 
 # Uygulama başlasın
 if __name__ == "__main__":
