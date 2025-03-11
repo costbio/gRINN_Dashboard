@@ -22,6 +22,7 @@ pairs_list = total_df['Pair'].unique()    #tekrar kontrol et..
 first_amino_acids = sorted(set([p.split('-')[0] for p in pairs_list]))
 second_amino_acids = sorted(set([p.split('-')[1] for p in pairs_list]))
 
+
 # Boş (default) figürler
 fig_total = go.Figure()
 fig_elec = go.Figure()
