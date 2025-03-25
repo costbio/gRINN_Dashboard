@@ -241,4 +241,4 @@ def update_pair_energy_graph(selected_rows_first, selected_rows_second, second_t
 
 
 if __name__ == "__main__":
-    app.run_server(debug=True, port="8051")
+    app.run_server(debug=True, port="8052")
