@@ -5,6 +5,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from dash_bio.utils import PdbParser, create_mol3d_style
+import bio
 
 root = os.path.dirname(os.path.abspath(__file__))
 root = os.path.join(root, 'test_data', 'prot_lig_1')
@@ -13,7 +14,7 @@ total_csv = os.path.join(root, 'energies_intEnTotal.csv')
 elec_csv = os.path.join(root, 'energies_intEnElec.csv')
 vdw_csv = os.path.join(root, 'energies_intEnVdW.csv')
 
-
+# 
 parser = PdbParser(pdb_path)
 model_data = parser.mol3d_data()
 
