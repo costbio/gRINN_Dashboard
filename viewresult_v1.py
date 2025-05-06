@@ -35,23 +35,31 @@ model_data = parser.mol3d_data()
 
 # used the ngl package to color according to the protein chains.....?
 base_name = os.path.splitext(os.path.basename(pdb_path))[0]
+
 data_list = [
     ngl_parser.get_data(
         data_path  = root + "/",
         pdb_id     = base_name,
-        color      = "lightgray",
-        reset_view = True,
+        color      = "blue",
+        reset_view = False,
         local      = True
     )
 ]
 
 initial_molstyles = {
     "representations":   ["cartoon"],
-    "colorScheme":       "chainindex",
-    "chosenAtomsColor":  "#FFFFFF",
-    "chosenAtomsRadius": 1
+    #"colorScheme":       "chainindex",
+    "chosenAtomsColor":  "blue",
+    "chosenAtomsRadius": 1,
+    "color": "blue",
 }
 
+initial_molstyles_test = {
+    "representations": ["cartoon"],
+    "chosenAtomsColor": "blue",
+    "colorScheme": "uniform",
+    "colorValue": "blue"
+}
 
 app = dash.Dash(__name__)
 
@@ -176,7 +184,7 @@ html.Div([
         dashbio.NglMoleculeViewer(
             id='molecule3d_viewer',
             data=data_list,
-            molStyles=initial_molstyles,
+            molStyles=initial_molstyles_test,
             width='100%',
             height='100%'
         ),
@@ -184,7 +192,9 @@ html.Div([
             'display': 'flex',
             'justifyContent': 'center',
             'alignItems': 'center',
-            'height': 'calc(100vh - 40px)'  # because of header  
+            'height': '100%',
+            'flex': '1',
+            'overflow': 'hidden'   
         }
     )
 ], style={
@@ -204,6 +214,7 @@ html.Div([
         Output("pair_energy_graph", "figure"),
         Output("second_residue_table", "data"),
         Output("pairwise_summary_table", "data"),
+        Output("molecule3d_viewer","molStyles"),
     ],
     [
         Input("first_residue_table", "selected_rows"),
@@ -213,7 +224,7 @@ html.Div([
 )
 def update_results(sel1, sel2, second_data):
     if not sel1:
-        return go.Figure(), [], []
+        return go.Figure(), [], [], initial_molstyles_test
 
     first = first_res_list[sel1[0]]
     filt = total_df[(total_df['res1']==first)|(total_df['res2']==first)]
@@ -236,7 +247,8 @@ def update_results(sel1, sel2, second_data):
     else:
         fig = go.Figure()
 
-    return fig, second_table, summary
+    
+    return fig, second_table, summary, initial_molstyles_test
 
 if __name__ == '__main__':
-    app.run_server(debug=True, port=8050)
+    app.run(debug=True, port=8050)
