@@ -1,11 +1,12 @@
 import dash, os
-from dash import dcc, html, dash_table, Input, Output, State
-import dash_bio as dashbio
-import dash_bio.utils.ngl_parser as ngl_parser
+from dash import Dash, dcc, html, dash_table, Input, Output, State, callback, ctx
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from dash_bio.utils import PdbParser
+import dash_molstar
+from dash_molstar.utils import molstar_helper
+from dash_molstar.utils.representations import Representation
 
 root      = os.path.dirname(os.path.abspath(__file__))
 root      = os.path.join(root, 'test_data', 'prot_lig_1')
@@ -29,37 +30,11 @@ total_long['Type'] = 'total'
 first_res_list  = total_df['res1'].unique()
 second_res_list = total_df['res2'].unique()
 
+cartoon = Representation(type='cartoon', color='uniform')
+cartoon.set_color_params({'value': 0xD3D3D3})
 
-parser     = PdbParser(pdb_path)
-model_data = parser.mol3d_data()
-
-# used the ngl package to color according to the protein chains.....?
-base_name = os.path.splitext(os.path.basename(pdb_path))[0]
-
-data_list = [
-    ngl_parser.get_data(
-        data_path  = root + "/",
-        pdb_id     = base_name,
-        color      = "blue",
-        reset_view = False,
-        local      = True
-    )
-]
-
-initial_molstyles = {
-    "representations":   ["cartoon"],
-    #"colorScheme":       "chainindex",
-    "chosenAtomsColor":  "blue",
-    "chosenAtomsRadius": 1,
-    "color": "blue",
-}
-
-initial_molstyles_test = {
-    "representations": ["cartoon"],
-    "chosenAtomsColor": "blue",
-    "colorScheme": "uniform",
-    "colorValue": "blue"
-}
+chain_A = molstar_helper.get_targets(chain='A') # Should be modified to include all chains in the input.
+component = molstar_helper.create_component(label='Protein', targets=[chain_A], representation=cartoon)
 
 app = dash.Dash(__name__)
 
@@ -164,8 +139,6 @@ app.layout = html.Div([
 
                     
                     dcc.Tab(label="Interaction Energy Matrix", value="tab-matrix", children=[html.Div("Matrix...")]),
-                    dcc.Tab(label="Interaction Energy Correlations", value="tab-correlations", children=[html.Div("Correlations...")]),
-                    dcc.Tab(label="Residue Correlation Matrix", value="tab-residue-matrix", children=[html.Div("Residue Matrix...")]),
                     dcc.Tab(label="Network Analysis", value="tab-network", children=[html.Div("Network... ")]),
                 ]
             )
@@ -181,13 +154,9 @@ app.layout = html.Div([
 html.Div([
     html.H3("3D Molecular Viewer"),
     html.Div(  
-        dashbio.NglMoleculeViewer(
-            id='molecule3d_viewer',
-            data=data_list,
-            molStyles=initial_molstyles_test,
-            width='100%',
-            height='100%'
-        ),
+        dash_molstar.MolstarViewer(
+        data=molstar_helper.parse_molecule(pdb_path, component= component, preset={'kind':'empty'}),
+        id='viewer', style={'width': '100%', 'height':'60%'}),
         style={
             'display': 'flex',
             'justifyContent': 'center',
@@ -195,7 +164,7 @@ html.Div([
             'height': '100%',
             'flex': '1',
             'overflow': 'hidden'   
-        }
+            }
     )
 ], style={
             'width': '35%',
@@ -214,7 +183,8 @@ html.Div([
         Output("pair_energy_graph", "figure"),
         Output("second_residue_table", "data"),
         Output("pairwise_summary_table", "data"),
-        Output("molecule3d_viewer","molStyles"),
+        Output('viewer', 'selection'),
+        Output('viewer', 'focus'),
     ],
     [
         Input("first_residue_table", "selected_rows"),
@@ -224,7 +194,7 @@ html.Div([
 )
 def update_results(sel1, sel2, second_data):
     if not sel1:
-        return go.Figure(), [], [], initial_molstyles_test
+        return go.Figure(), [], [], None, None
 
     first = first_res_list[sel1[0]]
     filt = total_df[(total_df['res1']==first)|(total_df['res2']==first)]
@@ -247,8 +217,24 @@ def update_results(sel1, sel2, second_data):
     else:
         fig = go.Figure()
 
+    # Update focus on molecular viewer
+    if sel2:
+        res1_chain = first[-1]
+        res1_resid = first[3:-2]
+        second = second_data[sel2[0]]['Residue']
+        res2_chain = second[-1]
+        res2_resid = second[3:-2]
+        residue1 = molstar_helper.get_targets(res1_chain, res1_resid)
+        residue2 = molstar_helper.get_targets(res2_chain, res2_resid)
+        seldata = molstar_helper.get_selection([residue1, residue2], select=True, add=False)
+        focusdata = molstar_helper.get_focus([residue1, residue2], analyse=True)
+    else:
+        seldata = None
+        focusdata = None
+
     
-    return fig, second_table, summary, initial_molstyles_test
+    return fig, second_table, summary, seldata, focusdata
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=8050)
