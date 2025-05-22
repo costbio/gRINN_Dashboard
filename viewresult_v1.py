@@ -2,7 +2,6 @@ import os
 import dash
 from dash import Dash, dcc, html, dash_table, Input, Output, State, callback_context, no_update
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import dash_molstar
 from dash_molstar.utils import molstar_helper
@@ -10,11 +9,11 @@ from dash_molstar.utils.representations import Representation
 
 # File paths
 data_dir = os.path.join(os.path.dirname(__file__), 'test_data', 'prot_lig_1')
-pdb_path  = os.path.join(data_dir, 'system_dry.pdb')
+pdb_path = os.path.join(data_dir, 'system_dry.pdb')
 total_csv = os.path.join(data_dir, 'energies_intEnTotal.csv')
-traj_xtc  = os.path.join(data_dir, 'traj.xtc')
+traj_xtc = os.path.join(data_dir, 'traj.xtc')
 
-# Load energy data
+# Load and transform interaction energy data
 total_df = pd.read_csv(total_csv)
 total_df['Pair'] = total_df['res1'] + '-' + total_df['res2']
 cols2drop = [
@@ -23,184 +22,213 @@ cols2drop = [
 ]
 total_long = (
     total_df
-    .drop(columns=cols2drop + ['res1','res2'])
+    .drop(columns=cols2drop + ['res1', 'res2'])
     .melt(id_vars=['Pair'], var_name='Frame', value_name='Energy')
 )
-first_res_list  = total_df['res1'].unique()
-second_res_list = total_df['res2'].unique()
+total_long['Energy'] = pd.to_numeric(total_long['Energy'], errors='coerce')
+total_long = total_long[total_long['Energy'].notna()].copy()
 
-# Molstar configuration
+# Determine frame range
+df_frames = pd.to_numeric(total_long['Frame'], errors='coerce').dropna().astype(int)
+frame_min, frame_max = int(df_frames.min()), int(df_frames.max())
+
+# Extract residue lists
+first_res_list = total_df['res1'].unique()
+
+# Molecular visualization setup
 cartoon = Representation(type='cartoon', color='uniform')
 cartoon.set_color_params({'value': 0xD3D3D3})
 chainA = molstar_helper.get_targets(chain='A')
-component = molstar_helper.create_component(
-    label='Protein', targets=[chainA], representation=cartoon
-)
-
-# Prepare trajectory data
-topo   = molstar_helper.parse_molecule(pdb_path, component=component)
+component = molstar_helper.create_component(label='Protein', targets=[chainA], representation=cartoon)
+topo = molstar_helper.parse_molecule(pdb_path, component=component)
 coords = molstar_helper.parse_coordinate(traj_xtc)
-traj_data = molstar_helper.get_trajectory(topo, coords)
 
-# Initialize Dash app
+def get_full_trajectory():
+    return molstar_helper.get_trajectory(topo, coords)
+initial_traj = get_full_trajectory()
+
+# App layout
 app = Dash(__name__)
 app.layout = html.Div([
-    html.H1("gRINN Workflow Results", style={'textAlign':'center'}),
+    html.H1("gRINN Workflow Results", style={'textAlign': 'center'}),
+    dcc.Store(id='clicked_frame_store', data=frame_min),
     html.Div(
-        style={'display':'flex','height':'100vh','gap':'10px'},
+        style={'display': 'flex', 'height': '100vh', 'gap': '5px'},
         children=[
-            # Left panel: Pairwise Energies
             html.Div(
-                style={
-                    'width':'65%', 'border':'1px solid #CCC', 'padding':'10px',
-                    'boxSizing':'border-box'
-                },
+                style={'width': '65%', 'border': '1px solid #CCC', 'padding': '10px', 'boxSizing': 'border-box'},
                 children=[
-                    dcc.Tabs(
-                        id='main-tabs', value='tab-pairwise', children=[
-                            dcc.Tab(
-                                label='Pairwise Energies', value='tab-pairwise', children=[
+                    dcc.Tabs(id='main-tabs', value='tab-pairwise', children=[
+                        dcc.Tab(label='Pairwise Energies', value='tab-pairwise', children=[
+                            html.Div(
+                                style={'display': 'flex', 'height': 'calc(100vh - 50px)', 'gap': '2px'},
+                                children=[
                                     html.Div(
-                                        style={'display':'flex','height':'calc(100vh - 50px)','gap':'5px'},
+                                        style={'minWidth': '160px', 'maxWidth': '200px', 'overflowY': 'auto'},
                                         children=[
-                                            # First residue selection with pagination
-                                            html.Div(
-                                                style={'flex':'1','overflowY':'auto'},
-                                                children=[
-                                                    html.H4("Select First Residue"),
-                                                    dash_table.DataTable(
-                                                        id='first_residue_table',
-                                                        columns=[{'name':'Residue','id':'Residue'}],
-                                                        data=[{'Residue': r} for r in first_res_list],
-                                                        row_selectable='single',
-                                                        page_action='native',
-                                                        page_current=0,
-                                                        page_size=25,
-                                                        style_table={
-                                                            'height':'calc(100vh - 200px)',
-                                                            'width':'120px'
-                                                        }
-                                                    )
-                                                ]
-                                            ),
-                                            # Second residue + IE with pagination
-                                            html.Div(
-                                                style={'flex':'1','overflowY':'auto'},
-                                                children=[
-                                                    html.H4("Select Second Residue & IE"),
-                                                    dash_table.DataTable(
-                                                        id='second_residue_table',
-                                                        columns=[
-                                                            {'name':'Residue','id':'Residue'},
-                                                            {'name':'IE [kcal/mol]','id':'IE'}
-                                                        ],
-                                                        data=[],
-                                                        row_selectable='single',
-                                                        page_action='native',
-                                                        page_current=0,
-                                                        page_size=15,
-                                                        style_table={
-                                                            'height':'calc(100vh - 200px)',
-                                                            'width':'200px'
-                                                        }
-                                                    )
-                                                ]
-                                            ),
-                                            # Energy graph
-                                            html.Div(
-                                                style={'flex':'2','paddingLeft':'20px'},
-                                                children=[
-                                                    html.H4("Total Interaction Energy"),
-                                                    dcc.Graph(
-                                                        id='pair_energy_graph',
-                                                        style={'height':'calc(100vh - 100px)'}
-                                                    )
-                                                ]
+                                            html.H4("Select First Residue"),
+                                            dash_table.DataTable(
+                                                id='first_residue_table',
+                                                columns=[{'name': 'Residue', 'id': 'Residue'}],
+                                                data=[{'Residue': r} for r in first_res_list],
+                                                row_selectable='single',
+                                                style_table={'height': 'calc(100vh - 200px)', 'overflowY': 'scroll'}
+                                            )
+                                        ]
+                                    ),
+                                    html.Div(
+                                        style={'width': '200px', 'maxWidth': '200px', 'overflowY': 'auto'},
+                                        children=[
+                                            html.H4("Select Second Residue & IE"),
+                                            dash_table.DataTable(
+                                                id='second_residue_table',
+                                                columns=[
+                                                    {'name': 'Residue', 'id': 'Residue'},
+                                                    {'name': 'IE [kcal/mol]', 'id': 'IE'}
+                                                ],
+                                                data=[],
+                                                row_selectable='single',
+                                                style_table={'height': 'calc(100vh - 200px)', 'overflowY': 'scroll'}
+                                            )
+                                        ]
+                                    ),
+                                    html.Div(
+                                        style={'flex': '2', 'paddingLeft': '10px'},
+                                        children=[
+                                            dcc.Graph(
+                                                id='pair_energy_graph',
+                                                config={'displayModeBar': True},
+                                                style={'height': 'calc(100vh - 100px)'}
                                             )
                                         ]
                                     )
                                 ]
-                            ),
-                            dcc.Tab(label='Interaction Energy Matrix', value='tab-matrix', children=[html.Div("Matrix...")]),
-                            dcc.Tab(label='Network Analysis', value='tab-network', children=[html.Div("Network...")])
-                        ]
-                    )
+                            )
+                        ]),
+                        dcc.Tab(label='Interaction Energy Matrix', value='tab-matrix', children=[html.Div("Matrix...")]),
+                        dcc.Tab(label='Network Analysis', value='tab-network', children=[html.Div("Network...")])
+                    ])
                 ]
             ),
-            # Right panel: 3D Viewer
             html.Div(
-                style={
-                    'width':'35%', 'border':'1px solid #CCC', 'padding':'10px',
-                    'boxSizing':'border-box'
-                },
+                style={'width': '35%', 'border': '1px solid #CCC', 'padding': '10px', 'boxSizing': 'border-box'},
                 children=[
                     html.H3("3D Molecular Viewer"),
                     dash_molstar.MolstarViewer(
                         id='viewer',
-                        data=traj_data,
-                        style={'width':'100%','height':'90%'}
-                    )
+                        data=initial_traj,
+                        layout={'modelIndex': frame_min},
+                        style={'width': '100%', 'height': '80%'}
+                    ),
+                    html.Div([
+                        html.Label("Frame:", style={'marginBottom': '5px'}),
+                        dcc.Slider(
+                            id='frame_slider',
+                            min=frame_min,
+                            max=frame_max,
+                            step=1,
+                            value=frame_min,
+                            marks={i: str(i) for i in range(frame_min, frame_max + 1, max(1, (frame_max - frame_min) // 10))}
+                        )
+                    ], style={'paddingTop': '10px'})
                 ]
             )
         ]
     )
 ])
 
-# Unified callback: update table, graph, viewer focus/selection,
-# and clear second-residue selection when first table changes.
 @app.callback(
-    [
-        Output('pair_energy_graph','figure'),
-        Output('second_residue_table','data'),
-        Output('viewer','selection'),
-        Output('viewer','focus'),
-        Output('second_residue_table','selected_rows')
-    ],
-    [
-        Input('first_residue_table','selected_rows'),
-        Input('second_residue_table','selected_rows')
-    ],
-    [State('second_residue_table','data')]
+    Output('pair_energy_graph', 'figure'),
+    Output('second_residue_table', 'data'),
+    Output('viewer', 'selection'),
+    Output('viewer', 'focus'),
+    Output('second_residue_table', 'selected_rows'),
+    Input('first_residue_table', 'selected_rows'),
+    Input('second_residue_table', 'selected_rows'),
+    State('second_residue_table', 'data'),
+    State('clicked_frame_store', 'data')
 )
-def update_all(sel1, sel2, second_data):
+def update_pairs(sel1, sel2, second_data, selected_frame):
     ctx = callback_context.triggered[0]['prop_id'].split('.')[0]
-    fig = go.Figure()
-    seldata = None
-    focusdata = None
+    fig = go.Figure(); seldata = None; focusdata = None
 
-    # 1) First residue changed -> rebuild second table, clear graph & viewer, reset selection
     if ctx == 'first_residue_table':
         if not sel1:
             return fig, [], no_update, no_update, []
         first = first_res_list[sel1[0]]
-        filt = total_df[(total_df['res1']==first)|(total_df['res2']==first)]
-        seconds = pd.concat([filt['res1'], filt['res2']]).unique().tolist()
-        seconds = [r for r in seconds if r!=first]
-        table_data = []
-        for r in seconds:
-            p1, p2 = f"{first}-{r}", f"{r}-{first}"
-            subset = total_long.query("Pair==@p1 or Pair==@p2")
-            ie = pd.to_numeric(subset['Energy'], errors='coerce').mean() if not subset.empty else 0
-            table_data.append({'Residue': r, 'IE': round(ie,3)})
-        return fig, table_data, no_update, no_update, []
+        filt = total_df[(total_df['res1'] == first) | (total_df['res2'] == first)]
+        others = [r for r in pd.concat([filt['res1'], filt['res2']]).unique() if r != first]
+        table = []
+        for r in others:
+            p1 = f"{first}-{r}"; p2 = f"{r}-{first}"
+            vals = total_long[(total_long['Pair'] == p1) | (total_long['Pair'] == p2)]['Energy']
+            ie = round(vals.mean(), 3) if not vals.empty else 0
+            table.append({'Residue': r, 'IE': ie})
+        return fig, table, no_update, no_update, []
 
-    # 2) Second residue changed -> update graph & viewer, keep table and selection
     if ctx == 'second_residue_table' and sel1 and sel2:
         first = first_res_list[sel1[0]]
         second = second_data[sel2[0]]['Residue']
-        p1, p2 = f"{first}-{second}", f"{second}-{first}"
-        df_line = total_long.query("Pair==@p1 or Pair==@p2")
-        fig = px.line(df_line, x='Frame', y='Energy', title=f"Energies for {p1}")
-        chain1, resid1 = first.split('_')[-1], first.split('_')[0][3:]
-        chain2, resid2 = second.split('_')[-1], second.split('_')[0][3:]
-        t1 = molstar_helper.get_targets(chain1, resid1)
-        t2 = molstar_helper.get_targets(chain2, resid2)
-        seldata   = molstar_helper.get_selection([t1,t2], select=True, add=False)
-        focusdata = molstar_helper.get_focus([t1,t2], analyse=True)
+        p1 = f"{first}-{second}"; p2 = f"{second}-{first}"
+        df_line = total_long[(total_long['Pair'] == p1) | (total_long['Pair'] == p2)]
+
+        fig.add_trace(go.Scatter(
+            x=df_line['Frame'],
+            y=df_line['Energy'],
+            mode='lines+markers',
+            name='Energy',
+            marker=dict(color='blue', size=6, opacity=0.5),
+            line=dict(color='blue')
+        ))
+
+        try:
+            selected_frame = int(selected_frame)
+            if selected_frame in df_line['Frame'].astype(int).values:
+                energy_at_frame = df_line[df_line['Frame'].astype(int) == selected_frame]['Energy'].values[0]
+                fig.add_trace(go.Scatter(
+                    x=[selected_frame], y=[energy_at_frame],
+                    mode='markers',
+                    marker=dict(color='red', size=12),
+                    name='Selected Frame'
+                ))
+        except Exception as e:
+            print("Marker error:", e)
+
+        fig.update_layout(
+            clickmode='event+select',
+            hovermode='x unified',
+            title=f"Energies for {first}-{second}",
+            xaxis_title='Frame',
+            yaxis_title='Energy'
+        )
+
+        c1, r1 = first.split('_')[-1], first.split('_')[0][3:]
+        c2, r2 = second.split('_')[-1], second.split('_')[0][3:]
+        t1 = molstar_helper.get_targets(c1, r1); t2 = molstar_helper.get_targets(c2, r2)
+        seldata = molstar_helper.get_selection([t1, t2], select=True, add=False)
+        focusdata = molstar_helper.get_focus([t1, t2], analyse=True)
         return fig, second_data, seldata, focusdata, sel2
 
-    # 3) Fallback: no updates
     return fig, no_update, None, None, no_update
+
+@app.callback(
+    Output('clicked_frame_store', 'data'),
+    Input('pair_energy_graph', 'clickData'),
+    prevent_initial_call=True
+)
+def store_clicked_frame(clickData):
+    if clickData and 'points' in clickData:
+        frame = int(clickData['points'][0]['x'])
+        return frame
+    return no_update
+
+@app.callback(
+    Output('frame_slider', 'value'),
+    Output('viewer', 'frame'),
+    Input('clicked_frame_store', 'data')
+)
+def update_slider_and_viewer(frame_idx):
+    return frame_idx, frame_idx
 
 if __name__ == '__main__':
     app.run(debug=True, port=8051)
