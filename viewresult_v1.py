@@ -131,7 +131,8 @@ app.layout = html.Div([
                             max=frame_max,
                             step=1,
                             value=frame_min,
-                            marks={i: str(i) for i in range(frame_min, frame_max + 1, max(1, (frame_max - frame_min) // 10))}
+                            marks={i: str(i) for i in range(frame_min, frame_max + 1, max(1, (frame_max - frame_min) // 10))},
+                            tooltip={'always_visible': True, 'placement': 'top'}
                         )
                     ], style={'paddingTop': '10px'})
                 ]
