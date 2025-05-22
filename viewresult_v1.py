@@ -150,11 +150,12 @@ app.layout = html.Div([
     Output('second_residue_table', 'selected_rows'),
     Input('first_residue_table', 'selected_rows'),
     Input('second_residue_table', 'selected_rows'),
-    Input('frame_slider', 'value'),
+    Input('frame_slider', 'drag_value'),
     State('second_residue_table', 'data')
 )
 def update_interface(sel1, sel2, selected_frame, second_data):
     
+    print(sel1, sel2, selected_frame)
     ctx = callback_context.triggered[0]['prop_id'].split('.')[0]
     fig = go.Figure(); seldata = None; focusdata = None
     
