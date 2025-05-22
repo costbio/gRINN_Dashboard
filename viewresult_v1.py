@@ -11,7 +11,7 @@ from dash_molstar.utils.representations import Representation
 data_dir = os.path.join(os.path.dirname(__file__), 'test_data', 'prot_lig_1')
 pdb_path = os.path.join(data_dir, 'system_dry.pdb')
 total_csv = os.path.join(data_dir, 'energies_intEnTotal.csv')
-traj_xtc = os.path.join(data_dir, 'traj.xtc')
+traj_xtc = os.path.join(data_dir, 'traj_superposed.xtc')
 
 # Load and transform interaction energy data
 total_df = pd.read_csv(total_csv)
@@ -32,6 +32,10 @@ total_long = total_long[total_long['Energy'].notna()].copy()
 df_frames = pd.to_numeric(total_long['Frame'], errors='coerce').dropna().astype(int)
 frame_min, frame_max = int(df_frames.min()), int(df_frames.max())
 
+# Dummy initial pair selection
+selected_pair1 = None
+selected_pair2 = None
+
 # Extract residue lists
 first_res_list = total_df['res1'].unique()
 
@@ -51,7 +55,6 @@ initial_traj = get_full_trajectory()
 app = Dash(__name__)
 app.layout = html.Div([
     html.H1("gRINN Workflow Results", style={'textAlign': 'center'}),
-    dcc.Store(id='clicked_frame_store', data=frame_min),
     html.Div(
         style={'display': 'flex', 'height': '100vh', 'gap': '5px'},
         children=[
@@ -142,16 +145,18 @@ app.layout = html.Div([
     Output('second_residue_table', 'data'),
     Output('viewer', 'selection'),
     Output('viewer', 'focus'),
+    Output('viewer', 'frame'),
     Output('second_residue_table', 'selected_rows'),
     Input('first_residue_table', 'selected_rows'),
     Input('second_residue_table', 'selected_rows'),
-    State('second_residue_table', 'data'),
-    State('clicked_frame_store', 'data')
+    Input('frame_slider', 'value'),
+    State('second_residue_table', 'data')
 )
-def update_pairs(sel1, sel2, second_data, selected_frame):
+def update_interface(sel1, sel2, selected_frame, second_data):
+    
     ctx = callback_context.triggered[0]['prop_id'].split('.')[0]
     fig = go.Figure(); seldata = None; focusdata = None
-
+    
     if ctx == 'first_residue_table':
         if not sel1:
             return fig, [], no_update, no_update, []
@@ -164,9 +169,9 @@ def update_pairs(sel1, sel2, second_data, selected_frame):
             vals = total_long[(total_long['Pair'] == p1) | (total_long['Pair'] == p2)]['Energy']
             ie = round(vals.mean(), 3) if not vals.empty else 0
             table.append({'Residue': r, 'IE': ie})
-        return fig, table, no_update, no_update, []
+        return fig, table, no_update, no_update, selected_frame, []
 
-    if ctx == 'second_residue_table' and sel1 and sel2:
+    if (ctx == 'second_residue_table' and sel1 and sel2) or (ctx == 'frame_slider' and sel1 and sel2):
         first = first_res_list[sel1[0]]
         second = second_data[sel2[0]]['Residue']
         p1 = f"{first}-{second}"; p2 = f"{second}-{first}"
@@ -194,6 +199,7 @@ def update_pairs(sel1, sel2, second_data, selected_frame):
         except Exception as e:
             print("Marker error:", e)
 
+
         fig.update_layout(
             clickmode='event+select',
             hovermode='x unified',
@@ -207,28 +213,10 @@ def update_pairs(sel1, sel2, second_data, selected_frame):
         t1 = molstar_helper.get_targets(c1, r1); t2 = molstar_helper.get_targets(c2, r2)
         seldata = molstar_helper.get_selection([t1, t2], select=True, add=False)
         focusdata = molstar_helper.get_focus([t1, t2], analyse=True)
-        return fig, second_data, seldata, focusdata, sel2
+        return fig, second_data, seldata, focusdata, selected_frame, sel2
 
-    return fig, no_update, None, None, no_update
+    return fig, no_update, None, None, selected_frame, no_update
 
-@app.callback(
-    Output('clicked_frame_store', 'data'),
-    Input('pair_energy_graph', 'clickData'),
-    prevent_initial_call=True
-)
-def store_clicked_frame(clickData):
-    if clickData and 'points' in clickData:
-        frame = int(clickData['points'][0]['x'])
-        return frame
-    return no_update
-
-@app.callback(
-    Output('frame_slider', 'value'),
-    Output('viewer', 'frame'),
-    Input('clicked_frame_store', 'data')
-)
-def update_slider_and_viewer(frame_idx):
-    return frame_idx, frame_idx
 
 if __name__ == '__main__':
     app.run(debug=True, port=8051)
