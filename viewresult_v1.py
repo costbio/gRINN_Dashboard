@@ -32,11 +32,7 @@ total_long = total_long[total_long['Energy'].notna()].copy()
 df_frames = pd.to_numeric(total_long['Frame'], errors='coerce').dropna().astype(int)
 frame_min, frame_max = int(df_frames.min()), int(df_frames.max())
 
-# Dummy initial pair selection
-selected_pair1 = None
-selected_pair2 = None
-
-# Extract residue lists
+# Extract residue list
 first_res_list = total_df['res1'].unique()
 
 # Molecular visualization setup
@@ -108,7 +104,11 @@ app.layout = html.Div([
                                 ]
                             )
                         ]),
-                        dcc.Tab(label='Interaction Energy Matrix', value='tab-matrix', children=[html.Div("Matrix...")]),
+                        dcc.Tab(label='Interaction Energy Matrix', value='tab-matrix', children=[
+                            html.Div([
+                                dcc.Graph(id='matrix_heatmap', style={'height': 'calc(100vh - 100px)'})
+                            ])
+                        ]),
                         dcc.Tab(label='Network Analysis', value='tab-network', children=[html.Div("Network...")])
                     ])
                 ]
@@ -148,20 +148,27 @@ app.layout = html.Div([
     Output('viewer', 'focus'),
     Output('viewer', 'frame'),
     Output('second_residue_table', 'selected_rows'),
+    Output('frame_slider', 'value'),
     Input('first_residue_table', 'selected_rows'),
     Input('second_residue_table', 'selected_rows'),
     Input('frame_slider', 'drag_value'),
+    Input('pair_energy_graph', 'clickData'),
     State('second_residue_table', 'data')
 )
-def update_interface(sel1, sel2, selected_frame, second_data):
-    
-    print(sel1, sel2, selected_frame)
+def update_interface(sel1, sel2, selected_frame, clickData, second_data):
     ctx = callback_context.triggered[0]['prop_id'].split('.')[0]
     fig = go.Figure(); seldata = None; focusdata = None
-    
+
+    if clickData:
+        try:
+            clicked_frame = int(clickData['points'][0]['x'])
+            selected_frame = clicked_frame
+        except Exception as e:
+            print("ClickData parse error:", e)
+
     if ctx == 'first_residue_table':
         if not sel1:
-            return fig, [], no_update, no_update, []
+            return fig, [], no_update, no_update, selected_frame, [], selected_frame
         first = first_res_list[sel1[0]]
         filt = total_df[(total_df['res1'] == first) | (total_df['res2'] == first)]
         others = [r for r in pd.concat([filt['res1'], filt['res2']]).unique() if r != first]
@@ -171,9 +178,9 @@ def update_interface(sel1, sel2, selected_frame, second_data):
             vals = total_long[(total_long['Pair'] == p1) | (total_long['Pair'] == p2)]['Energy']
             ie = round(vals.mean(), 3) if not vals.empty else 0
             table.append({'Residue': r, 'IE': ie})
-        return fig, table, no_update, no_update, selected_frame, []
+        return fig, table, no_update, no_update, selected_frame, [], selected_frame
 
-    if (ctx == 'second_residue_table' and sel1 and sel2) or (ctx == 'frame_slider' and sel1 and sel2):
+    if sel1 and sel2:
         first = first_res_list[sel1[0]]
         second = second_data[sel2[0]]['Residue']
         p1 = f"{first}-{second}"; p2 = f"{second}-{first}"
@@ -188,19 +195,14 @@ def update_interface(sel1, sel2, selected_frame, second_data):
             line=dict(color='blue')
         ))
 
-        try:
-            selected_frame = int(selected_frame)
-            if selected_frame in df_line['Frame'].astype(int).values:
-                energy_at_frame = df_line[df_line['Frame'].astype(int) == selected_frame]['Energy'].values[0]
-                fig.add_trace(go.Scatter(
-                    x=[selected_frame], y=[energy_at_frame],
-                    mode='markers',
-                    marker=dict(color='red', size=12),
-                    name='Selected Frame'
-                ))
-        except Exception as e:
-            print("Marker error:", e)
-
+        if selected_frame in df_line['Frame'].astype(int).values:
+            energy_at_frame = df_line[df_line['Frame'].astype(int) == selected_frame]['Energy'].values[0]
+            fig.add_trace(go.Scatter(
+                x=[selected_frame], y=[energy_at_frame],
+                mode='markers',
+                marker=dict(color='red', size=12),
+                name='Selected Frame'
+            ))
 
         fig.update_layout(
             clickmode='event+select',
@@ -215,10 +217,57 @@ def update_interface(sel1, sel2, selected_frame, second_data):
         t1 = molstar_helper.get_targets(c1, r1); t2 = molstar_helper.get_targets(c2, r2)
         seldata = molstar_helper.get_selection([t1, t2], select=True, add=False)
         focusdata = molstar_helper.get_focus([t1, t2], analyse=True)
-        return fig, second_data, seldata, focusdata, selected_frame, sel2
 
-    return fig, no_update, None, None, selected_frame, no_update
+        return fig, second_data, seldata, focusdata, selected_frame, sel2, selected_frame
 
+    return fig, no_update, None, None, selected_frame, no_update, selected_frame
+
+# ➕ Interaction Matrix Callback (Frame-based)
+@app.callback(
+    Output('matrix_heatmap', 'figure'),
+    Input('frame_slider', 'value')
+)
+def update_energy_matrix(frame_value):
+    frame_col = str(frame_value)
+    if frame_col not in total_df.columns:
+        return go.Figure()
+
+    df = total_df[['res1', 'res2', frame_col]].copy()
+    df.columns = ['res1', 'res2', 'energy']
+
+    # Clean residue IDs (e.g., TYR124_A → ETYR124)
+    df['res1'] = 'E' + df['res1'].str.replace('_', '')
+    df['res2'] = 'E' + df['res2'].str.replace('_', '')
+
+    residues = sorted(set(df['res1']).union(set(df['res2'])))
+    matrix_df = pd.DataFrame(0, index=residues, columns=residues)
+
+    for _, row in df.iterrows():
+        r1, r2, val = row['res1'], row['res2'], row['energy']
+        matrix_df.loc[r1, r2] = val
+        matrix_df.loc[r2, r1] = val  # symmetric
+
+    fig = go.Figure(data=go.Heatmap(
+        z=matrix_df.values,
+        x=matrix_df.columns,
+        y=matrix_df.index,
+        colorscale='BrBG',
+        zmid=0,
+        zmin=-7,
+        zmax=7,
+        colorbar=dict(title='Energy (kcal/mol)')
+    ))
+
+    fig.update_layout(
+        title=f'Interaction Energy Matrix (Frame {frame_value})',
+        xaxis_title='Residue',
+        yaxis_title='Residue',
+        xaxis={'tickangle': 45, 'automargin': True},
+        yaxis={'automargin': True},
+        margin=dict(l=50, r=50, t=50, b=100),
+        font=dict(size=10)
+    )
+    return fig
 
 if __name__ == '__main__':
     app.run(debug=True, port=8051)
