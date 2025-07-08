@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 import dash_molstar
 from dash_molstar.utils import molstar_helper
 from dash_molstar.utils.representations import Representation
+import networkx as nx
 
 # File paths
 data_dir = os.path.join(os.path.dirname(__file__), 'test_data', 'prot_lig_1')
@@ -32,8 +33,8 @@ total_long = total_long[total_long['Energy'].notna()].copy()
 df_frames = pd.to_numeric(total_long['Frame'], errors='coerce').dropna().astype(int)
 frame_min, frame_max = int(df_frames.min()), int(df_frames.max())
 
-# Extract residue list
-first_res_list = total_df['res1'].unique()
+# Residue list
+first_res_list = sorted(total_df['res1'].unique())
 
 # Molecular visualization setup
 cartoon = Representation(type='cartoon', color='uniform')
@@ -51,96 +52,95 @@ initial_traj = get_full_trajectory()
 app = Dash(__name__)
 app.layout = html.Div([
     html.H1("gRINN Workflow Results", style={'textAlign': 'center'}),
-    html.Div(
-        style={'display': 'flex', 'height': '100vh', 'gap': '5px'},
-        children=[
-            html.Div(
-                style={'width': '65%', 'border': '1px solid #CCC', 'padding': '10px', 'boxSizing': 'border-box'},
-                children=[
-                    dcc.Tabs(id='main-tabs', value='tab-pairwise', children=[
-                        dcc.Tab(label='Pairwise Energies', value='tab-pairwise', children=[
-                            html.Div(
-                                style={'display': 'flex', 'height': 'calc(100vh - 50px)', 'gap': '2px'},
-                                children=[
-                                    html.Div(
-                                        style={'minWidth': '160px', 'maxWidth': '200px', 'overflowY': 'auto'},
-                                        children=[
-                                            html.H4("Select First Residue"),
-                                            dash_table.DataTable(
-                                                id='first_residue_table',
-                                                columns=[{'name': 'Residue', 'id': 'Residue'}],
-                                                data=[{'Residue': r} for r in first_res_list],
-                                                row_selectable='single',
-                                                style_table={'height': 'calc(100vh - 200px)', 'overflowY': 'scroll'}
-                                            )
-                                        ]
-                                    ),
-                                    html.Div(
-                                        style={'width': '200px', 'maxWidth': '200px', 'overflowY': 'auto'},
-                                        children=[
-                                            html.H4("Select Second Residue & IE"),
-                                            dash_table.DataTable(
-                                                id='second_residue_table',
-                                                columns=[
-                                                    {'name': 'Residue', 'id': 'Residue'},
-                                                    {'name': 'IE [kcal/mol]', 'id': 'IE'}
-                                                ],
-                                                data=[],
-                                                row_selectable='single',
-                                                style_table={'height': 'calc(100vh - 200px)', 'overflowY': 'scroll'}
-                                            )
-                                        ]
-                                    ),
-                                    html.Div(
-                                        style={'flex': '2', 'paddingLeft': '10px'},
-                                        children=[
-                                            dcc.Graph(
-                                                id='pair_energy_graph',
-                                                config={'displayModeBar': True},
-                                                style={'height': 'calc(100vh - 100px)'}
-                                            )
-                                        ]
-                                    )
-                                ]
+    html.Div(style={'display': 'flex', 'height': '100vh', 'gap': '5px'}, children=[
+        # Left Panel: Tabs
+        html.Div(style={'width': '65%', 'border': '1px solid #CCC', 'padding': '10px', 'boxSizing': 'border-box'}, children=[
+            dcc.Tabs(id='main-tabs', value='tab-pairwise', children=[
+                # Pairwise Energies
+                dcc.Tab(label='Pairwise Energies', value='tab-pairwise', children=[
+                    html.Div(style={'display': 'flex', 'height': 'calc(100vh - 50px)', 'gap': '2px'}, children=[
+                        html.Div(style={'minWidth': '160px', 'maxWidth': '200px', 'overflowY': 'auto'}, children=[
+                            html.H4("Select First Residue"),
+                            dash_table.DataTable(
+                                id='first_residue_table',
+                                columns=[{'name': 'Residue', 'id': 'Residue'}],
+                                data=[{'Residue': r} for r in first_res_list],
+                                row_selectable='single',
+                                style_table={'height': 'calc(100vh - 200px)', 'overflowY': 'scroll'}
                             )
                         ]),
-                        dcc.Tab(label='Interaction Energy Matrix', value='tab-matrix', children=[
-                            html.Div([
-                                dcc.Graph(id='matrix_heatmap', style={'height': 'calc(100vh - 100px)'})
-                            ])
+                        html.Div(style={'width': '200px', 'maxWidth': '200px', 'overflowY': 'auto'}, children=[
+                            html.H4("Select Second Residue & IE"),
+                            dash_table.DataTable(
+                                id='second_residue_table',
+                                columns=[
+                                    {'name': 'Residue', 'id': 'Residue'},
+                                    {'name': 'IE [kcal/mol]', 'id': 'IE'}
+                                ],
+                                data=[],
+                                row_selectable='single',
+                                style_table={'height': 'calc(100vh - 200px)', 'overflowY': 'scroll'}
+                            )
                         ]),
-                        dcc.Tab(label='Network Analysis', value='tab-network', children=[html.Div("Network...")])
+                        html.Div(style={'flex': '2', 'paddingLeft': '10px'}, children=[
+                            dcc.Graph(id='pair_energy_graph', config={'displayModeBar': True}, style={'height': 'calc(100vh - 100px)'})
+                        ])
                     ])
-                ]
-            ),
-            html.Div(
-                style={'width': '35%', 'border': '1px solid #CCC', 'padding': '10px', 'boxSizing': 'border-box'},
-                children=[
-                    html.H3("3D Molecular Viewer"),
-                    dash_molstar.MolstarViewer(
-                        id='viewer',
-                        data=initial_traj,
-                        layout={'modelIndex': frame_min},
-                        style={'width': '100%', 'height': '80%'}
-                    ),
+                ]),
+                # Interaction Energy Matrix
+                dcc.Tab(label='Interaction Energy Matrix', value='tab-matrix', children=[
+                    html.Div([dcc.Graph(id='matrix_heatmap', style={'height': 'calc(100vh - 100px)'})])
+                ]),
+                # Network Analysis
+                dcc.Tab(label='Network Analysis', value='tab-network', children=[
                     html.Div([
-                        html.Label("Frame:", style={'marginBottom': '5px'}),
-                        dcc.Slider(
-                            id='frame_slider',
-                            min=frame_min,
-                            max=frame_max,
-                            step=1,
-                            value=frame_min,
-                            marks={i: str(i) for i in range(frame_min, frame_max + 1, max(1, (frame_max - frame_min) // 10))},
-                            tooltip={'always_visible': True, 'placement': 'top'}
-                        )
-                    ], style={'paddingTop': '10px'})
-                ]
-            )
-        ]
-    )
+                        # Controls
+                        html.Div(style={'display': 'flex', 'alignItems': 'center', 'paddingBottom': '10px'}, children=[
+                            dcc.Checklist(
+                                id='include_covalent_edges',
+                                options=[{'label': 'Include covalent bonds as edges', 'value': 'include'}],
+                                value=['include'],
+                                style={'marginRight': '20px'}
+                            ),
+                            html.Label("Edge addition energy cutoff (kcal/mol): "),
+                            dcc.Input(id='energy_cutoff', type='number', value=1.0, step=0.1, style={'width': '80px', 'marginRight': '20px'}),
+                            html.Button('Update Network', id='update_network_btn', n_clicks=0),
+                            html.Button('Export Network to File...', id='export_network_btn', n_clicks=0, style={'marginLeft': '10px'})
+                        ]),
+                        # Subtabs for metrics & shortest paths
+                        dcc.Tabs(id='network-tabs', value='residue-metrics', children=[
+                            dcc.Tab(label='Residue Metrics', value='residue-metrics', children=[
+                                html.Div(style={'display': 'flex', 'gap': '20px', 'height': '75vh', 'overflowY': 'auto'}, children=[
+                                    dcc.Graph(id='degree_centrality', style={'flex': '1', 'height': '100%'}),
+                                    dcc.Graph(id='betweenness_centrality', style={'flex': '1', 'height': '100%'}),
+                                    dcc.Graph(id='closeness_centrality', style={'flex': '1', 'height': '100%'}),
+                                ])
+                            ]),
+                            dcc.Tab(label='Shortest Paths', value='shortest-paths', children=[
+                                html.Div("Shortest path analysis will appear here.")
+                            ])
+                        ])
+                    ])
+                ])
+            ])
+        ]),
+        # Right Panel: 3D Viewer & Slider
+        html.Div(style={'width': '35%', 'border': '1px solid #CCC', 'padding': '10px', 'boxSizing': 'border-box'}, children=[
+            html.H3("3D Molecular Viewer"),
+            dash_molstar.MolstarViewer(id='viewer', data=initial_traj, layout={'modelIndex': frame_min}, style={'width': '100%', 'height': '80%'}),
+            html.Div(style={'paddingTop': '10px'}, children=[
+                html.Label("Frame:"),
+                dcc.Slider(
+                    id='frame_slider', min=frame_min, max=frame_max, step=1, value=frame_min,
+                    marks={i: str(i) for i in range(frame_min, frame_max+1, max(1, (frame_max-frame_min)//10))},
+                    tooltip={'always_visible': True, 'placement': 'top'}
+                )
+            ])
+        ])
+    ])
 ])
 
+# Pairwise & Viewer callback
 @app.callback(
     Output('pair_energy_graph', 'figure'),
     Output('second_residue_table', 'data'),
@@ -148,28 +148,26 @@ app.layout = html.Div([
     Output('viewer', 'focus'),
     Output('viewer', 'frame'),
     Output('second_residue_table', 'selected_rows'),
-    Output('frame_slider', 'value'),
     Input('first_residue_table', 'selected_rows'),
     Input('second_residue_table', 'selected_rows'),
-    Input('frame_slider', 'drag_value'),
+    Input('frame_slider', 'value'),
     Input('pair_energy_graph', 'clickData'),
     State('second_residue_table', 'data')
 )
 def update_interface(sel1, sel2, selected_frame, clickData, second_data):
-    ctx = callback_context.triggered[0]['prop_id'].split('.')[0]
     fig = go.Figure(); seldata = None; focusdata = None
-
     if clickData:
         try:
             clicked_frame = int(clickData['points'][0]['x'])
             selected_frame = clicked_frame
-        except Exception as e:
-            print("ClickData parse error:", e)
-
-    if ctx == 'first_residue_table':
-        if not sel1:
-            return fig, [], no_update, no_update, selected_frame, [], selected_frame
-        first = first_res_list[sel1[0]]
+        except:
+            pass
+    # First residue selection
+    if not sel1:
+        return fig, [], no_update, no_update, selected_frame, []
+    first = first_res_list[sel1[0]]
+    # Populate second table
+    if not sel2:
         filt = total_df[(total_df['res1'] == first) | (total_df['res2'] == first)]
         others = [r for r in pd.concat([filt['res1'], filt['res2']]).unique() if r != first]
         table = []
@@ -178,51 +176,28 @@ def update_interface(sel1, sel2, selected_frame, clickData, second_data):
             vals = total_long[(total_long['Pair'] == p1) | (total_long['Pair'] == p2)]['Energy']
             ie = round(vals.mean(), 3) if not vals.empty else 0
             table.append({'Residue': r, 'IE': ie})
-        return fig, table, no_update, no_update, selected_frame, [], selected_frame
-
-    if sel1 and sel2:
-        first = first_res_list[sel1[0]]
-        second = second_data[sel2[0]]['Residue']
-        p1 = f"{first}-{second}"; p2 = f"{second}-{first}"
-        df_line = total_long[(total_long['Pair'] == p1) | (total_long['Pair'] == p2)]
-
-        fig.add_trace(go.Scatter(
-            x=df_line['Frame'],
-            y=df_line['Energy'],
-            mode='lines+markers',
-            name='Energy',
-            marker=dict(color='blue', size=6, opacity=0.5),
-            line=dict(color='blue')
-        ))
-
-        if selected_frame in df_line['Frame'].astype(int).values:
-            energy_at_frame = df_line[df_line['Frame'].astype(int) == selected_frame]['Energy'].values[0]
-            fig.add_trace(go.Scatter(
-                x=[selected_frame], y=[energy_at_frame],
-                mode='markers',
-                marker=dict(color='red', size=12),
-                name='Selected Frame'
-            ))
-
-        fig.update_layout(
-            clickmode='event+select',
-            hovermode='x unified',
-            title=f"Energies for {first}-{second}",
-            xaxis_title='Frame',
-            yaxis_title='Energy'
-        )
-
-        c1, r1 = first.split('_')[-1], first.split('_')[0][3:]
-        c2, r2 = second.split('_')[-1], second.split('_')[0][3:]
+        return fig, table, no_update, no_update, selected_frame, []
+    # Second residue chosen
+    second = second_data[sel2[0]]['Residue']
+    p1, p2 = f"{first}-{second}", f"{second}-{first}"
+    df_line = total_long[(total_long['Pair'] == p1) | (total_long['Pair'] == p2)]
+    fig.add_trace(go.Scatter(x=df_line['Frame'], y=df_line['Energy'], mode='lines+markers', name='Energy', marker=dict(color='blue', size=6, opacity=0.5), line=dict(color='blue')))
+    if selected_frame in df_line['Frame'].astype(int).values:
+        energy_at_frame = df_line[df_line['Frame'].astype(int)==selected_frame]['Energy'].values[0]
+        fig.add_trace(go.Scatter(x=[selected_frame], y=[energy_at_frame], mode='markers', marker=dict(color='red', size=12), name='Selected Frame'))
+    fig.update_layout(clickmode='event+select', hovermode='x unified', title=f"Energies for {first}-{second}", xaxis_title='Frame', yaxis_title='Energy')
+    # Mol* selection
+    try:
+        r1, c1 = first.split('_')[0][3:], first.split('_')[1]
+        r2, c2 = second.split('_')[0][3:], second.split('_')[1]
         t1 = molstar_helper.get_targets(c1, r1); t2 = molstar_helper.get_targets(c2, r2)
         seldata = molstar_helper.get_selection([t1, t2], select=True, add=False)
         focusdata = molstar_helper.get_focus([t1, t2], analyse=True)
+    except:
+        seldata, focusdata = no_update, no_update
+    return fig, second_data, seldata, focusdata, selected_frame, sel2
 
-        return fig, second_data, seldata, focusdata, selected_frame, sel2, selected_frame
-
-    return fig, no_update, None, None, selected_frame, no_update, selected_frame
-
-# ➕ Interaction Matrix Callback (Frame-based)
+# Interaction Matrix callback
 @app.callback(
     Output('matrix_heatmap', 'figure'),
     Input('frame_slider', 'value')
@@ -231,43 +206,48 @@ def update_energy_matrix(frame_value):
     frame_col = str(frame_value)
     if frame_col not in total_df.columns:
         return go.Figure()
-
-    df = total_df[['res1', 'res2', frame_col]].copy()
-    df.columns = ['res1', 'res2', 'energy']
-
-    # Clean residue IDs (e.g., TYR124_A → ETYR124)
-    df['res1'] = 'E' + df['res1'].str.replace('_', '')
-    df['res2'] = 'E' + df['res2'].str.replace('_', '')
-
-    residues = sorted(set(df['res1']).union(set(df['res2'])))
-    matrix_df = pd.DataFrame(0, index=residues, columns=residues)
-
-    for _, row in df.iterrows():
-        r1, r2, val = row['res1'], row['res2'], row['energy']
-        matrix_df.loc[r1, r2] = val
-        matrix_df.loc[r2, r1] = val  # symmetric
-
-    fig = go.Figure(data=go.Heatmap(
-        z=matrix_df.values,
-        x=matrix_df.columns,
-        y=matrix_df.index,
-        colorscale='BrBG',
-        zmid=0,
-        zmin=-7,
-        zmax=7,
-        colorbar=dict(title='Energy (kcal/mol)')
-    ))
-
-    fig.update_layout(
-        title=f'Interaction Energy Matrix (Frame {frame_value})',
-        xaxis_title='Residue',
-        yaxis_title='Residue',
-        xaxis={'tickangle': 45, 'automargin': True},
-        yaxis={'automargin': True},
-        margin=dict(l=50, r=50, t=50, b=100),
-        font=dict(size=10)
-    )
+    df = total_df[['res1','res2',frame_col]].copy(); df.columns=['res1','res2','energy']
+    df['res1'] = 'E'+df['res1'].str.replace('_',''); df['res2']='E'+df['res2'].str.replace('_','')
+    residues = sorted(set(df['res1']).union(df['res2']))
+    matrix_df = pd.DataFrame(0,index=residues,columns=residues)
+    for _,row in df.iterrows():
+        r1, r2, v = row['res1'],row['res2'],row['energy']
+        matrix_df.loc[r1,r2]=v; matrix_df.loc[r2,r1]=v
+    fig = go.Figure(data=go.Heatmap(z=matrix_df.values, x=matrix_df.columns, y=matrix_df.index, colorscale='BrBG', zmid=0, zmin=-7, zmax=7, colorbar=dict(title='Energy (kcal/mol)')))
+    fig.update_layout(title=f'Interaction Energy Matrix (Frame {frame_value})', xaxis_title='Residue', yaxis_title='Residue', xaxis={'tickangle':45,'automargin':True}, yaxis={'automargin':True}, margin=dict(l=50,r=50,t=50,b=100), font=dict(size=10))
     return fig
+
+# Network Analysis callback
+def build_graph(frame, include_cov, cutoff):
+    df_f = total_long[total_long['Frame'].astype(int)==frame]
+    G = nx.Graph()
+    for res in first_res_list: G.add_node(res)
+    for _,row in df_f.iterrows():
+        r1,r2 = row['Pair'].split('-'); e=row['Energy']
+        if abs(e)>=cutoff: G.add_edge(r1,r2,weight=abs(e))
+    if 'include' in include_cov:
+        for i in range(len(first_res_list)-1): G.add_edge(first_res_list[i], first_res_list[i+1], weight=0.0)
+    return G
+
+@app.callback(
+    Output('degree_centrality','figure'),
+    Output('betweenness_centrality','figure'),
+    Output('closeness_centrality','figure'),
+    Input('update_network_btn','n_clicks'),
+    Input('frame_slider','value'),
+    Input('include_covalent_edges','value'),
+    Input('energy_cutoff','value')
+)
+def update_network(n_clicks, frame, include_cov, cutoff):
+    G = build_graph(frame, include_cov, cutoff)
+    deg = dict(G.degree()); btw = nx.betweenness_centrality(G); clo = nx.closeness_centrality(G)
+    def make_fig(data,title):
+        items=sorted(data.items(), key=lambda x:x[1], reverse=True)
+        nodes,vals=zip(*items)
+        fig=go.Figure(go.Bar(x=vals,y=nodes,orientation='h',marker_color='steelblue'))
+        fig.update_layout(title=title, margin=dict(l=150,r=20,t=40,b=40))
+        return fig
+    return make_fig(deg,'Degree'), make_fig(btw,'Betweenness centrality'), make_fig(clo,'Closeness centrality')
 
 if __name__ == '__main__':
     app.run(debug=True, port=8051)
