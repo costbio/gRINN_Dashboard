@@ -1,6 +1,6 @@
 import os
 import dash
-from dash import Dash, dcc, html, dash_table, Input, Output, State, no_update
+from dash import Dash, dcc, html, dash_table, Input, Output, State, no_update, ctx
 import pandas as pd
 import plotly.graph_objects as go
 import dash_molstar
@@ -709,23 +709,39 @@ app.layout = html.Div([
 )
 def update_interface(sel1, sel2, selected_frame, second_data):
     fig = go.Figure(); seldata=None; focusdata=None
-    # İlk seçim
+    
+    # First selection
     if not sel1:
         return fig, [], no_update, no_update, selected_frame, []
+    
     first = first_res_list[sel1[0]]
-    # İkinci tablo
-    if not sel2:
-        filt = total_df[(total_df['res1']==first)|(total_df['res2']==first)]
-        others = [r for r in pd.concat([filt['res1'],filt['res2']]).unique() if r!=first]
-        table=[]
-        for r in others:
-            p1,p2=f"{first}-{r}",f"{r}-{first}"
-            vals=total_long[(total_long['Pair']==p1)|(total_long['Pair']==p2)]['Energy']
-            ie=round(vals.mean(),3) if not vals.empty else 0
-            table.append({'Residue':r,'IE':ie})
+    
+    # Always update second table when first residue is selected
+    filt = total_df[(total_df['res1']==first)|(total_df['res2']==first)]
+    others = [r for r in pd.concat([filt['res1'],filt['res2']]).unique() if r!=first]
+    # Sort the interacting residues by sequence order
+    others_sorted = sort_residues_by_sequence(others)
+    table=[]
+    for r in others_sorted:
+        p1,p2=f"{first}-{r}",f"{r}-{first}"
+        vals=total_long[(total_long['Pair']==p1)|(total_long['Pair']==p2)]['Energy']
+        ie=round(vals.mean(),3) if not vals.empty else 0
+        table.append({'Residue':r,'IE':ie})
+    
+    # Check if first residue table was the trigger - if so, clear second table selection
+    if ctx.triggered and ctx.triggered[0]['prop_id'] == 'first_residue_table.selected_rows':
         return fig, table, no_update, no_update, selected_frame, []
-    # Enerji grafiği ve nokta
-    second=second_data[sel2[0]]['Residue']
+    
+    # If no second residue is selected, return with updated table and cleared selection
+    if not sel2:
+        return fig, table, no_update, no_update, selected_frame, []
+    
+    # Validate that the selected second residue exists in the updated table
+    if sel2[0] >= len(table):
+        return fig, table, no_update, no_update, selected_frame, []
+    
+    # Energy graph and point
+    second=table[sel2[0]]['Residue']
     p1,p2=f"{first}-{second}",f"{second}-{first}" 
     df_line=total_long[(total_long['Pair']==p1)|(total_long['Pair']==p2)]
     fig.add_trace(go.Scatter(
@@ -760,7 +776,7 @@ def update_interface(sel1, sel2, selected_frame, second_data):
             borderwidth=2
         )
     )
-    # Mol* seçim
+    # Mol* selection
     try:
         r1,c1=first.split('_')[0][3:],first.split('_')[1]
         r2,c2=second.split('_')[0][3:],second.split('_')[1]
@@ -769,7 +785,7 @@ def update_interface(sel1, sel2, selected_frame, second_data):
         focusdata=molstar_helper.get_focus([t1,t2],analyse=True)
     except:
         seldata,focusdata=no_update,no_update
-    return fig, second_data, seldata, focusdata, selected_frame, sel2
+    return fig, table, seldata, focusdata, selected_frame, sel2
 
 # Interaction Matrix
 @app.callback(
